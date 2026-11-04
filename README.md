@@ -1,5 +1,5 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)
-
+A fork so i can implement some custom control interfaces that hook up nicely to my abritrage setup.
 # fronius_modbus
 Home assistant Custom Component for reading data from Fronius Gen24 Inverter and connected smart meters and battery storage. This integration uses a local modbus connection. 
 
