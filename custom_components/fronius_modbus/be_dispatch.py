@@ -66,9 +66,19 @@ class DispatchCoordinator:
                 else:
                     # Set both directional limits to zero. Fronius firmware may
                     # interpret this differently; verify physical battery power.
-                    await client.change_settings(mode=3, charge_limit=0, discharge_limit=0)
+                    await client.set_storage_control_mode(0)
+                    await client.set_charge_rate(0)
+                    await client.set_discharge_rate(0)
+                    await client.set_storage_control_mode(3)
+                    registers = await client.get_registers(
+                        unit_id=client._inverter_unit_id, address=40348, count=9
+                    )
+                    if registers is None or len(registers) != 9 or (
+                        registers[0], registers[7], registers[8]
+                    ) != (3, 0, 0):
+                        raise HomeAssistantError(f"Zero-power hold readback failed: {registers}")
                     client.storage_extended_control_mode = 3
-                    message = "0 W hold requested (hardware unverified)"
+                    message = "0 W hold register values verified; physical power unverified"
 
                 self.self_use = auto
                 self.power = watts
