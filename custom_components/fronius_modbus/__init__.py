@@ -47,6 +47,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HubConfigEntry) -> bool:
     if entry.runtime_data.storage_configured:
         from .be_dispatch import DispatchCoordinator
         entry.runtime_data.be_dispatch = DispatchCoordinator(entry.runtime_data)
+        await entry.runtime_data.be_dispatch.initialize()
 
     # This creates each HA object for each platform your device requires.
     # It's done by calling the `async_setup_entry` function in each platform module.
