@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # List of platforms to support. There should be a matching .py file for each,
 # eg <cover.py> and <sensor.py>
-PLATFORMS = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR]
+PLATFORMS = [Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
 
 type HubConfigEntry = ConfigEntry[hub.Hub]
 
@@ -43,6 +43,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: HubConfigEntry) -> bool:
     entry.runtime_data = hub.Hub(hass = hass, name = name, host = host, port = port, inverter_unit_id=inverter_unit_id, meter_unit_ids=meter_unit_ids, scan_interval = scan_interval)
     
     await entry.runtime_data.init_data()
+
+    if entry.runtime_data.storage_configured:
+        from .be_dispatch import DispatchCoordinator
+        entry.runtime_data.be_dispatch = DispatchCoordinator(entry.runtime_data)
 
     # This creates each HA object for each platform your device requires.
     # It's done by calling the `async_setup_entry` function in each platform module.
