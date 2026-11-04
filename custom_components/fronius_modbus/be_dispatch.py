@@ -17,9 +17,10 @@ _LOGGER = logging.getLogger(__name__)
 class DispatchCoordinator:
     def __init__(self, hub):
         self.hub = hub
-        self.self_use = True  # Assumption at startup; not an inverter readback.
-        self.power = 0
-        self.status = "Not commanded since startup"
+        self.self_use = None  # Discover actual hardware mode before showing UI.
+        self.power = None
+        self.initialized = False
+        self.status = "Reading inverter storage control state"
         self.error = None
         self._lock = asyncio.Lock()
         self.entities = []
@@ -28,6 +29,53 @@ class DispatchCoordinator:
         for entity in self.entities:
             if entity.hass:
                 entity.async_write_ha_state()
+
+    async def initialize(self):
+        """Reflect the persisted SunSpec storage command, without writing it."""
+        async with self._lock:
+            try:
+                # Addresses match this integration's SunSpec Int+SF register map.
+                registers = await self.hub._client.get_registers(
+                    unit_id=self.hub._client._inverter_unit_id,
+                    address=40348, count=9,
+                )
+                if registers is None or len(registers) != 9:
+                    raise HomeAssistantError("Cannot read Fronius storage control registers")
+
+                mode = registers[0]
+                discharge = registers[7] if registers[7] < 32768 else registers[7] - 65536
+                charge = registers[8] if registers[8] < 32768 else registers[8] - 65536
+
+                if mode == 0:
+                    self.self_use = True
+                    self.power = 0
+                elif mode == 3 and discharge == 0 and charge == 0:
+                    self.self_use = False
+                    self.power = 0
+                elif mode == 1 and charge < 0:
+                    self.self_use = False
+                    self.power = int(round((-charge / 10000) * self.discharge_max / 10) * 10)
+                elif mode == 2 and discharge < 0:
+                    self.self_use = False
+                    self.power = -int(round((-discharge / 10000) * self.charge_max / 10) * 10)
+                else:
+                    raise HomeAssistantError(
+                        f"Unsupported external control state: mode={mode}, "
+                        f"charge={charge}, discharge={discharge}"
+                    )
+
+                self.initialized = True
+                self.error = None
+                self.status = (
+                    f"Recovered inverter state from SunSpec: mode={mode}, "
+                    f"charge={charge}, discharge={discharge}; no command sent"
+                )
+            except Exception as exc:
+                self.initialized = False
+                self.error = str(exc)
+                self.status = "Inverter state unknown; controls unavailable"
+                _LOGGER.warning("Fronius dispatch state recovery failed: %s", exc)
+            self.notify()
 
     @property
     def charge_max(self):
@@ -82,9 +130,11 @@ class DispatchCoordinator:
 
                 self.self_use = auto
                 self.power = watts
+                self.initialized = True
                 self.error = None
                 self.status = message + "; actual power not confirmed"
             except Exception as err:
+                self.initialized = False
                 self.error = str(err)
                 _LOGGER.exception("Fronius BE dispatch failed")
                 raise
@@ -101,7 +151,7 @@ class DispatchCoordinator:
             raise HomeAssistantError(
                 f"Power must be between {-self.charge_max} and {self.discharge_max} W"
             )
-        if self.self_use:
+        if self.self_use is True and self.initialized:
             self.power = watts
             self.status = f"Staged {watts} W (currently Auto)"
             self.notify()
@@ -123,6 +173,10 @@ class ForcedBatteryPower(NumberEntity):
         self._attr_device_info = coord.hub.device_info_storage
         self._attr_native_min_value = -coord.charge_max
         self._attr_native_max_value = coord.discharge_max
+
+    @property
+    def available(self):
+        return self.coord.initialized
 
     @property
     def native_value(self):
@@ -150,6 +204,10 @@ class SelfUseMode(SwitchEntity):
         self.coord = coord
         self._attr_unique_id = f"{coord.hub.hub_id}_be_self_use_mode"
         self._attr_device_info = coord.hub.device_info_storage
+
+    @property
+    def available(self):
+        return self.coord.initialized
 
     @property
     def is_on(self):
