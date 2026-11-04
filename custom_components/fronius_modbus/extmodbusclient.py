@@ -10,12 +10,14 @@ import struct
 import asyncio
 
 from pymodbus.client import AsyncModbusTcpClient
-try:
-    # For newer pymodbus versions (3.9.x+)
-    from pymodbus.pdu.pdu import unpack_bitstring
-except ImportError:
-    # For older pymodbus versions (3.8.x and below)
-    from pymodbus.utilities import unpack_bitstring
+def unpack_bitstring(data: bytes | bytearray) -> list[bool]:
+    """Unpack Modbus bit fields, least-significant bit first per byte.
+
+    Avoid importing PyModbus private utility functions, which have moved
+    between releases and no longer exist at either historical import path.
+    """
+    return [bool(byte & (1 << bit)) for byte in data for bit in range(8)]
+
 from pymodbus.exceptions import ModbusIOException, ConnectionException
 from pymodbus import ExceptionResponse
 
