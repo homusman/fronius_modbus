@@ -47,6 +47,13 @@ async def async_setup_entry(hass, config_entry, async_add_entities) -> None:
             )
             entities.append(number)
 
+    dispatch = getattr(hub, 'be_dispatch', None)
+    if dispatch is not None:
+        from .be_dispatch import ForcedBatteryPower
+        entity = ForcedBatteryPower(dispatch)
+        dispatch.entities.append(entity)
+        entities.append(entity)
+
     async_add_entities(entities)
     return True
 
