@@ -8,7 +8,6 @@ import voluptuous as vol
 from homeassistant import config_entries, exceptions
 from homeassistant.core import HomeAssistant
 
-from .hub import Hub
 from homeassistant.const import CONF_NAME, CONF_HOST, CONF_PORT, CONF_SCAN_INTERVAL
 from .const import (
     DOMAIN,
@@ -72,6 +71,10 @@ async def validate_input(hass: HomeAssistant, data: dict) -> dict[str, Any]:
         raise AddressesNotUnique
 
     try:
+        # Import hardware dependencies only once credentials are submitted.
+        # A broken pymodbus import should not prevent the setup form loading.
+        from .hub import Hub
+
         hub = Hub(hass, data[CONF_NAME], data[CONF_HOST], data[CONF_PORT], data[CONF_INVERTER_UNIT_ID], meter_addresses, data[CONF_SCAN_INTERVAL])
 
         await hub.init_data()
@@ -121,7 +124,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # This tells HA if it should be asking for updates, or it'll be notified of updates
     # automatically. This integration uses PUSH, as the hub will notify HA of
     # changes.
-    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
