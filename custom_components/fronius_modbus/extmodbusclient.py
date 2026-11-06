@@ -114,6 +114,10 @@ class ExtModbusClient:
 
     async def get_registers(self, unit_id, address, count, retries = 0):
         data = await self.read_holding_registers(unit_id=unit_id, address=address, count=count)
+        # A transport exception returns None. Do not dereference it; the
+        # caller must treat this as an unsuccessful read, not valid registers.
+        if data is None:
+            return None
         if data.isError():
             if isinstance(data,ModbusIOException):
                 if retries < 1:
