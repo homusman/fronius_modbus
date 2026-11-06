@@ -4,6 +4,7 @@
 
 import asyncio
 import logging
+import time
 from typing import Optional, Literal
 from .extmodbusclient import ExtModbusClient
 import requests
@@ -62,6 +63,7 @@ class FroniusModbusClient(ExtModbusClient):
         self._inverter_frequency_upper_bound = self._grid_frequency + 5
 
         self.data = {}
+        self.storage_last_success_monotonic = None
 
     async def init_data(self):
         await self.connect()
@@ -404,22 +406,19 @@ class FroniusModbusClient(ExtModbusClient):
         self.data['WChaGra'] = self.calculate_value(WChaGra, 0, 0)
         self.data['WDisChaGra'] = self.calculate_value(WDisChaGra, 0, 0)
 
-        control_mode = self.data.get('control_mode')
-        if control_mode is None or control_mode != STORAGE_CONTROL_MODE.get(storage_control_mode):
-            if discharge_power >= 0:
-                self.data['discharge_limit'] = discharge_power / 100.0 
-                self.data['grid_charge_power'] = 0
-            else: 
-                self.data['grid_charge_power'] = (discharge_power * -1) / 100.0 
-                self.data['discharge_limit'] = 0
-            if charge_power >= 0:
-                self.data['charge_limit'] = charge_power / 100 
-                self.data['grid_discharge_power'] = 0
-            else: 
-                self.data['grid_discharge_power'] = (charge_power * -1) / 100.0 
-                self.data['charge_limit'] = 0
-
-            self.data['control_mode'] = STORAGE_CONTROL_MODE.get(storage_control_mode)
+        # These legacy entities expose watts, not percentages. Refresh them
+        # on each successful storage poll, even if control mode is unchanged.
+        self.data['discharge_limit'] = max(0.0, discharge_power / 100.0) if discharge_power >= 0 else 0.0
+        self.data['grid_charge_power'] = (
+            round((-discharge_power / 10000.0) * self.max_charge_rate_w)
+            if discharge_power < 0 else 0
+        )
+        self.data['charge_limit'] = max(0.0, charge_power / 100.0) if charge_power >= 0 else 0.0
+        self.data['grid_discharge_power'] = (
+            round((-charge_power / 10000.0) * self.max_discharge_rate_w)
+            if charge_power < 0 else 0
+        )
+        self.data['control_mode'] = STORAGE_CONTROL_MODE.get(storage_control_mode)
 
         # set extended storage control mode at startup
         ext_control_mode = self.data.get('ext_control_mode')
@@ -455,6 +454,7 @@ class FroniusModbusClient(ExtModbusClient):
                 self.data['ext_control_mode'] = STORAGE_EXT_CONTROL_MODE[0]
                 self.storage_extended_control_mode = 0
 
+        self.storage_last_success_monotonic = time.monotonic()
         return True
 
     async def read_meter_data(self, meter_prefix, unit_id):
