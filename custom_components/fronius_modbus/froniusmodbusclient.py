@@ -384,6 +384,17 @@ class FroniusModbusClient(ExtModbusClient):
         # InOutWRte_RmpTms: not supported
         # ChaGriSet
         charge_grid_set = self._client.convert_from_registers(regs[15:16], data_type = self._client.DATATYPE.UINT16)
+        # SunSpec InWRte / OutWRte are signed percentages with SF=-2,
+        # hence raw range -10000..10000. Invalid register blocks must
+        # not silently become multi-megawatt Home Assistant values.
+        if storage_control_mode not in (0, 1, 2, 3) or not (
+            -10000 <= discharge_power <= 10000
+            and -10000 <= charge_power <= 10000
+        ):
+            raise ValueError(
+                f"Invalid Fronius storage control registers: mode={storage_control_mode}, "
+                f"out_rate={discharge_power}, in_rate={charge_power}"
+            )
         # WChaMax_SF: Scale factor for maximum charge. 0
         #max_charge_sf = self._client.convert_from_registers(regs[16:17], data_type = self._client.DATATYPE.INT16)
         # WChaDisChaGra_SF: Scale factor for maximum charge and discharge rate. 0
