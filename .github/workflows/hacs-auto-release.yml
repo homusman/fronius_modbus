@@ -1,0 +1,72 @@
+name: Publish HACS release on code changes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "custom_components/**"
+      - ".github/workflows/hacs-auto-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hacs-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Generate a versioned release snapshot
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          python3 - <<'PY'
+          import json, pathlib, re, subprocess
+          manifests = list(pathlib.Path("custom_components").glob("*/manifest.json"))
+          if len(manifests) != 1:
+              raise SystemExit(f"Expected one integration manifest, got {manifests}")
+          manifest = manifests[0]
+          data = json.loads(manifest.read_text())
+          current = data["version"]
+          match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", current)
+          if not match:
+              raise SystemExit(f"Unsupported manifest version {current!r}: use X.Y.Z")
+          versions = [tuple(map(int, match.groups()))]
+          for tag in subprocess.check_output(["git", "tag", "--list"], text=True).splitlines():
+              match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", tag)
+              if match:
+                  versions.append(tuple(map(int, match.groups())))
+          major, minor, patch = max(versions)
+          version = f"{major}.{minor}.{patch + 1}"
+          data["version"] = version
+          manifest.write_text(json.dumps(data, indent=2) + "\n")
+          with open(__import__("os").environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+          print(f"Preparing release v{version}; default branch remains unchanged")
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/*/manifest.json
+          git commit -m "chore(release): stamp manifest for v${{ steps.version.outputs.version }}"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "refs/tags/v${{ steps.version.outputs.version }}"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --title "v${{ steps.version.outputs.version }}" \
+            --generate-notes \
+            --latest
