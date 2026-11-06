@@ -24,6 +24,7 @@ class DispatchCoordinator:
         self.error = None
         self._lock = asyncio.Lock()
         self.entities = []
+        self._next_recovery_at = 0.0
 
     def notify(self):
         for entity in self.entities:
@@ -76,6 +77,38 @@ class DispatchCoordinator:
                 self.status = "Inverter state unknown; controls unavailable"
                 _LOGGER.warning("Fronius dispatch state recovery failed: %s", exc)
             self.notify()
+
+    async def recover_if_needed(self):
+        """Retry read-only hardware state recovery after a failed command.
+
+        Runs asynchronously after the hub polling pass, never during it.
+        A failed read must not produce an availability false-positive or write
+        to the inverter. Throttle unsuccessful attempts to 30 seconds.
+        """
+        if self.initialized or self._lock.locked():
+            return
+        now = asyncio.get_running_loop().time()
+        if now < self._next_recovery_at:
+            return
+        self._next_recovery_at = now + 30.0
+
+        # Share the hub's Modbus transaction slot with ordinary polling and
+        # writes. Do not block the event loop while waiting for that slot.
+        for _ in range(100):
+            if not self.hub._busy:
+                self.hub._busy = True
+                break
+            await asyncio.sleep(0.1)
+        else:
+            _LOGGER.warning("Fronius dispatch recovery postponed: hub busy")
+            return
+
+        try:
+            await self.initialize()  # Read-only; never reissues a power command.
+            if self.initialized:
+                _LOGGER.info("Fronius dispatch controls recovered from Modbus readback")
+        finally:
+            self.hub._busy = False
 
     @property
     def charge_max(self):
@@ -136,6 +169,7 @@ class DispatchCoordinator:
             except Exception as err:
                 self.initialized = False
                 self.error = str(err)
+                self.status = "Command failed; awaiting read-only Modbus recovery"
                 _LOGGER.exception("Fronius BE dispatch failed")
                 raise
             finally:
