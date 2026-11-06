@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Optional, Dict, Any
 
 from .const import (
@@ -66,9 +67,11 @@ class FroniusModbusNumber(FroniusModbusBaseEntity, NumberEntity):
 
         if self._key in self._hub.data:
             if self._key in ['grid_discharge_power','discharge_limit']:
-                value = round(self._hub.data[self._key] / 100.0 * self._hub.max_discharge_rate_w,0)
+                value = (self._hub.data[self._key] if self._key == 'grid_discharge_power'
+                         else round(self._hub.data[self._key] / 100.0 * self._hub.max_discharge_rate_w, 0))
             elif self._key in ['grid_charge_power','charge_limit']:
-                value = round(self._hub.data[self._key] / 100.0 * self._hub.max_charge_rate_w,0)
+                value = (self._hub.data[self._key] if self._key == 'grid_charge_power'
+                         else round(self._hub.data[self._key] / 100.0 * self._hub.max_charge_rate_w, 0))
             else:
                 value = self._hub.data[self._key]    
             return value
@@ -103,6 +106,10 @@ class FroniusModbusNumber(FroniusModbusBaseEntity, NumberEntity):
     @property
     def available(self) -> bool:
         """Return depending on mode."""
+        if self._key in ('grid_charge_power', 'grid_discharge_power'):
+            last = self._hub._client.storage_last_success_monotonic
+            if last is None or time.monotonic() - last > max(30, self._hub._scan_interval.total_seconds() * 3):
+                return False
         if self._key == 'minimum_reserve':
             return True
         if self._key == 'charge_limit' and self._hub.storage_extended_control_mode in [1,3,6]:
