@@ -57,9 +57,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add custom_components/*/manifest.json
-          git commit -m "chore(release): stamp manifest for v${{ steps.version.outputs.version }}"
-          git tag "v${{ steps.version.outputs.version }}"
-          git push origin "refs/tags/v${{ steps.version.outputs.version }}"
+          VERSION=$(python3 -c 'import json, pathlib; print(json.loads(next(pathlib.Path("custom_components").glob("*/manifest.json")).read_text())["version"])')
+          git commit -m "chore(release): stamp manifest for v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin "refs/tags/v${VERSION}"
 
       - name: Publish GitHub release
         env:
