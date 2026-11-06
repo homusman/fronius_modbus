@@ -188,9 +188,17 @@ class Hub:
                 update_result = False
 
 
-        if update_result:
-            for update_callback in self._entities:
-                update_callback()
+        # Always notify entities after a poll. Their availability may have
+        # changed even when the storage register read failed (freshness expiry).
+        for update_callback in self._entities:
+            update_callback()
+
+        # A failed forced-power write can invalidate the custom control pair.
+        # Attempt read-only recovery on later polling ticks. The coroutine
+        # waits until this poll releases the hub's busy flag before reading.
+        dispatch = getattr(self, "be_dispatch", None)
+        if dispatch is not None and not dispatch.initialized:
+            self._hass.async_create_task(dispatch.recover_if_needed())
 
     @toggle_busy
     async def test_connection(self) -> bool:
